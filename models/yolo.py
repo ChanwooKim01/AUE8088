@@ -52,6 +52,11 @@ from models.common import (
     MultiStreamC3,
     MultiStreamMaxPool2d,
     Fusion,
+    
+    # custom
+    CBAM,
+    C3_CBAM,
+    SELayer
 )
 from models.experimental import MixConv2d
 from utils.autoanchor import check_anchor_order
@@ -362,6 +367,11 @@ def parse_model(d, ch):
             C3x,
             MultiStreamConv,
             MultiStreamC3,
+            
+            # custom
+            CBAM,
+            C3_CBAM,
+            SELayer
         }:
             c1, c2 = ch[f], args[0]
             if c2 != no:  # if not output

@@ -28,16 +28,42 @@ class Albumentations:
 
             check_version(A.__version__, "1.0.3", hard=True)  # version requirement
 
+            # KAIST 데이터셋 특화 증강 설정 (안정화 버전)
+            # 오직 기하학적인 Augmentation만 가하는 것을 목표로! (색상 관련 Augmentation은 Thermal과의 연관성을 해칠 수 있을 것으로 판단됨됨)
             T = [
-                A.RandomResizedCrop(height=size, width=size, scale=(0.8, 1.0), ratio=(0.9, 1.11), p=0.2),
-                A.Blur(p=0.2),
-                A.MedianBlur(p=0.2),
-                A.ToGray(p=0.2),
-                A.CLAHE(p=0.2),
-                A.RandomBrightnessContrast(p=0.2),
-                A.RandomGamma(p=0.2),
-                A.ImageCompression(quality_lower=75, p=0.2),
-            ]  # transforms
+                # 보행자 검출에 적합한 크롭 (보수적 설정)
+                A.RandomResizedCrop(height=size, width=size, scale=(0.85, 1.0), ratio=(0.9, 1.1), p=0.5),
+                
+                # 조명 조건 다양화 (RGB/Thermal 공통)
+                # A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.3),
+                # A.RandomGamma(gamma_limit=(85, 115), p=0.2),
+                # A.CLAHE(clip_limit=2.0, tile_grid_size=(8, 8), p=0.2),
+                # A.ToGray(p=0.05),  # 흑백 변환 확률 감소
+                
+                # 노이즈 및 블러 (현실적인 조건 시뮬레이션)
+                # A.GaussNoise(var_limit=(5, 25), p=0.2),
+                # A.Blur(blur_limit=3, p=0.1),
+                # A.MedianBlur(blur_limit=3, p=0.1),
+                # A.MotionBlur(blur_limit=3, p=0.05),
+                
+                # 색상 변화 (RGB 채널 특화) -> 이 부분이 Thermal과의 연관성을 해칠 수 있을 것 같음. 제외
+                # A.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05, p=0.2),
+                # A.HueSaturationValue(hue_shift_limit=5, sat_shift_limit=10, val_shift_limit=5, p=0.2),
+                
+                # 날씨/환경 조건 시뮬레이션 -> 이 부분도 Thermal과의 관계성을 해칠 수 있을 것 같음. 제외
+                # A.RandomRain(slant_lower=-5, slant_upper=5, drop_length=10, drop_width=1, 
+                #            drop_color=(200, 200, 200), blur_value=1, brightness_coefficient=0.8, p=0.05),
+                # A.RandomFog(fog_coef_lower=0.05, fog_coef_upper=0.15, alpha_coef=0.05, p=0.05),
+                # A.RandomShadow(shadow_roi=(0, 0.5, 1, 1), num_shadows_lower=1, num_shadows_upper=1, p=0.1),
+                
+                # # 이미지 품질 관련
+                # A.ImageCompression(quality_lower=80, quality_upper=98, p=0.1),
+                # A.ISONoise(color_shift=(0.005, 0.02), intensity=(0.05, 0.2), p=0.1),
+                
+                # # 기하학적 변환 (보행자 포즈 보존)
+                # A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.05, rotate_limit=3, p=0.2),
+                # A.Perspective(scale=(0.01, 0.03), p=0.1),
+            ]  # KAIST multispectral pedestrian detection optimized transforms (stabilized)
             self.transform = A.Compose(T, bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"]))
 
             LOGGER.info(prefix + ", ".join(f"{x}".replace("always_apply=False, ", "") for x in T if x.p))
@@ -46,10 +72,31 @@ class Albumentations:
         except Exception as e:
             LOGGER.info(f"{prefix}{e}")
 
+    # def __call__(self, im, labels, p=1.0):
+    #     """Applies transformations to an image and labels with probability `p`, returning updated image and labels."""
+    #     if self.transform and random.random() < p:
+    #         new = self.transform(image=im, bboxes=labels[:, 1:], class_labels=labels[:, 0])  # transformed
+    #         im, labels = new["image"], np.array([[c, *b] for c, b in zip(new["class_labels"], new["bboxes"])])
+    #     return im, labels
     def __call__(self, im, labels, p=1.0):
         """Applies transformations to an image and labels with probability `p`, returning updated image and labels."""
         if self.transform and random.random() < p:
-            new = self.transform(image=im, bboxes=labels[:, 1:], class_labels=labels[:, 0])  # transformed
+            # Ensure input image is a numpy array (in HWC order, uint8)
+            if not isinstance(im, np.ndarray):
+                # if im is a torch Tensor, convert it
+                if isinstance(im, torch.Tensor):
+                    im = im.detach().cpu().numpy()
+                    # if in CHW format convert to HWC
+                    if im.shape[0] in [1, 3]:
+                        im = im.transpose(1, 2, 0)
+                    # Assume tensor image is [0,1]; convert to uint8
+                    if im.max() <= 1.0:
+                        im = (im * 255).astype(np.uint8)
+                    else:
+                        im = im.astype(np.uint8)
+                else:
+                    im = np.array(im)
+            new = self.transform(image=im, bboxes=labels[:, 1:], class_labels=labels[:, 0])
             im, labels = new["image"], np.array([[c, *b] for c, b in zip(new["class_labels"], new["bboxes"])])
         return im, labels
 

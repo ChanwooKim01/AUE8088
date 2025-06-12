@@ -104,8 +104,9 @@ class ComputeLoss:
     sort_obj_iou = False
 
     # Compute losses
-    def __init__(self, model, autobalance=False):
+    def __init__(self, model, is_train=True, autobalance=False):
         """Initializes ComputeLoss with model and autobalance option, autobalances losses if True."""
+        self.is_train = is_train
         device = next(model.parameters()).device  # get model device
         h = model.hyp  # hyperparameters
 
@@ -130,9 +131,12 @@ class ComputeLoss:
         self.nl = m.nl  # number of layers
         self.anchors = m.anchors
         self.device = device
-
+        
     def __call__(self, p, targets):  # predictions, targets
         """Performs forward pass, calculating class, box, and object loss for given predictions and targets."""
+        if not self.is_train:
+            return 0.0
+        
         lcls = torch.zeros(1, device=self.device)  # class loss
         lbox = torch.zeros(1, device=self.device)  # box loss
         lobj = torch.zeros(1, device=self.device)  # object loss
@@ -167,7 +171,24 @@ class ComputeLoss:
                 # do not calculate objectness loss
                 ign_idx = (tcls[i] == -1) & (iou > self.hyp["iou_t"])
                 keep = ~ign_idx
-                b, a, gj, gi, iou = b[keep], a[keep], gj[keep], gi[keep], iou[keep]
+                
+                # custom - 강화된 방어 로직
+                # Augmentation 등을 특히 수행했을 때, 모델 학습 시 배치에서 anchor와 매칭되는 값이 단 하나도 존재하지 않을 시 이 부분에서 오류 발생
+                # 아마, 데이터셋 자체에 label이 없는 이미지가 너무 많아서 자주 터지는 듯
+                if (iou.numel() == 0 or keep.numel() == 0 or iou.dim() == 0 or keep.sum() == 0 or
+                    b.numel() == 0 or a.numel() == 0 or gj.numel() == 0 or gi.numel() == 0):
+                    continue
+                # 추가 안전 검사: tensor 차원 및 크기 일치 확인
+                try:
+                    if len(b) != len(keep) or len(iou) != len(keep):
+                        continue
+                    keep_indices = keep.nonzero().squeeze(-1)
+                    if keep_indices.numel() == 0:
+                        continue
+                    b, a, gj, gi, iou = b[keep], a[keep], gj[keep], gi[keep], iou[keep]
+                except (IndexError, RuntimeError) as e:
+                    print(f"Warning: Skipping batch due to indexing error: {e}")
+                    continue
 
                 tobj[b, a, gj, gi] = iou  # iou ratio
 

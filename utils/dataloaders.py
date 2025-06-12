@@ -35,7 +35,18 @@ from utils.augmentations import (
     letterbox,
     mixup,
     random_perspective,
+    cutout
 )
+# from utils.augmentations_custom import (
+#     Albumentations,
+#     augment_hsv,
+#     classify_albumentations,
+#     classify_transforms,
+#     copy_paste,
+#     letterbox,
+#     mixup,
+#     random_perspective,
+# )
 from utils.general import (
     DATASETS_DIR,
     LOGGER,
@@ -1096,7 +1107,8 @@ class LoadRGBTImagesAndLabels(LoadImagesAndLabels):
 
         # TODO: make mosaic augmentation work
         self.mosaic = False
-
+        self.albumentations = Albumentations(size=self.img_size)
+        
         # Set ignore flag
         cond = self.ignore_settings['train' if is_train else 'test']
         for i in range(len(self.labels)):
@@ -1199,6 +1211,7 @@ class LoadRGBTImagesAndLabels(LoadImagesAndLabels):
 
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp["mosaic"]
+        
         if mosaic:
             raise NotImplementedError('Please make "mosaic" augmentation work!')
 
@@ -1227,8 +1240,6 @@ class LoadRGBTImagesAndLabels(LoadImagesAndLabels):
                     labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
 
                 if self.augment:
-                    raise NotImplementedError('Please make data augmentation work!')
-
                     img, labels = random_perspective(
                         img,
                         labels,
@@ -1238,7 +1249,7 @@ class LoadRGBTImagesAndLabels(LoadImagesAndLabels):
                         shear=hyp["shear"],
                         perspective=hyp["perspective"],
                     )
-
+                    pass
                 nl = len(labels)  # number of labels
                 if nl:
                     labels[:, 1:5] = xyxy2xywhn(labels[:, 1:5], w=img.shape[1], h=img.shape[0], clip=True, eps=1e-3)
@@ -1332,6 +1343,7 @@ class LoadRGBTImagesAndLabels(LoadImagesAndLabels):
 
 # Ancillary functions --------------------------------------------------------------------------------------------------
 def flatten_recursive(path=DATASETS_DIR / "coco128"):
+    
     """Flattens a directory by copying all files from subdirectories to a new top-level directory, preserving
     filenames.
     """

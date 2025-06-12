@@ -1,0 +1,56 @@
+# YOLOv5 🚀 by Ultralytics, AGPL-3.0 license
+# KAIST Multispectral Pedestrian Detection Dataset 완전 안전 모드 설정
+# 증강 최소화, 안정성 우선
+
+# 학습률 설정 (극도로 보수적)
+lr0: 0.0 # 학습 x
+lrf: 0.1 # 최종 학습률 비율
+momentum: 0.937 # SGD momentum
+weight_decay: 0.0005 # 가중치 감쇠
+warmup_epochs: 20.0 # 매우 긴 warmup 기간
+warmup_momentum: 0.8 # warmup 초기 momentum
+warmup_bias_lr: 0.1 # warmup 초기 bias 학습률
+
+# 손실 함수 가중치 (기본값)
+box: 0.05 # bbox loss 가중치
+cls: 0.3 # 분류 loss 가중치  
+cls_pw: 1.0 # 분류 positive weight
+obj: 0.7 # 객체성 loss 가중치
+obj_pw: 1.0 # 객체성 positive weight
+iou_t: 0.20 # IoU 임계값
+anchor_t: 4.0 # anchor 배수 임계값
+fl_gamma: 0.0 # focal loss gamma
+
+# HSV 증강 (멀티모달 데이터 고려)
+hsv_h: 0.010 # 색조 증강 (thermal 호환성)
+hsv_s: 0.5 # 채도 증강 (thermal에서 의미 있음)
+hsv_v: 0.3 # 명도 증강 (조명 조건 다양화)
+
+# 기하학적 증강 (보행자 포즈 보존)
+degrees: 3.0 # 회전 각도 (작게 설정)
+translate: 0.1 # 평행이동 비율
+scale: 0.2 # 스케일 변화 (보행자 크기 다양화)
+shear: 2.0 # 전단 변형 (작게 설정)
+perspective: 0.0001 # 원근 변형 (최소화)
+
+# 플립 증강
+flipud: 0.0 # 상하 플립 (보행자는 항상 직립)
+fliplr: 0.5 # 좌우 플립 (좌우 대칭성 활용)
+
+# 고급 증강 (멀티모달 특성 고려) - 안정화
+mosaic: 0.5 # 모자이크 확률 (안정성을 위해 감소)
+mixup: 0.0 # 믹스업 비활성화 (RGB-T 특성 보존)
+copy_paste: 0.05 # 복사-붙여넣기 (안정성을 위해 감소)
+
+# KAIST 특화 추가 파라미터
+# 클래스별 가중치 (person > people > cyclist > person?)
+class_weights: [1.0, 0.8, 0.9, 0.6]
+# 작은 객체 강조 계수
+small_object_weight: 1.5
+# 멀티모달 융합 가중치
+fusion_weight_rgb: 0.6
+fusion_weight_thermal: 0.4
+# 야간/저조도 조건 강조
+low_light_enhancement: True
+# Thermal 노이즈 시뮬레이션
+thermal_noise_std: 15.0

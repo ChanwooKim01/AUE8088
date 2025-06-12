@@ -1,0 +1,56 @@
+# YOLOv5 🚀 by Ultralytics, AGPL-3.0 license
+# KAIST Multispectral Pedestrian Detection Dataset 최소 증강 설정 (안정성 우선)
+# 사용법: python train.py --batch 4 --cfg models/custom_models/mymodel_cbam.yaml --weights '' --data kaist-rgbt.yaml --hyp data/hyps/hyp.kaist-minimal.yaml
+
+# 학습률 설정 (매우 보수적)
+lr0: 0.003 # 매우 작은 초기 학습률
+lrf: 0.1 # 최종 학습률 비율
+momentum: 0.937 # SGD momentum
+weight_decay: 0.0005 # 가중치 감쇠
+warmup_epochs: 10.0 # 긴 warmup 기간 (안정성)
+warmup_momentum: 0.8 # warmup 초기 momentum
+warmup_bias_lr: 0.1 # warmup 초기 bias 학습률
+
+# 손실 함수 가중치 (보수적)
+box: 0.05 # bbox loss 가중치 (기본값)
+cls: 0.3 # 분류 loss 가중치 (기본값)
+cls_pw: 1.0 # 분류 positive weight
+obj: 0.7 # 객체성 loss 가중치 (기본값)
+obj_pw: 1.0 # 객체성 positive weight
+iou_t: 0.20 # IoU 임계값
+anchor_t: 4.0 # anchor 배수 임계값
+fl_gamma: 0.0 # focal loss gamma
+
+# HSV 증강 (최소화)
+hsv_h: 0.005 # 색조 증강 (최소)
+hsv_s: 0.3 # 채도 증강 (최소)
+hsv_v: 0.2 # 명도 증강 (최소)
+
+# 기하학적 증강 (최소화)
+degrees: 0.0 # 회전 각도 (비활성화)
+translate: 0.05 # 평행이동 비율 (최소)
+scale: 0.05 # 스케일 변화 (최소)
+shear: 0.0 # 전단 변형 (비활성화)
+perspective: 0.0 # 원근 변형 (비활성화)
+
+# 플립 증강 (기본만)
+flipud: 0.0 # 상하 플립 (비활성화)
+fliplr: 0.5 # 좌우 플립만 활성화
+
+# 고급 증강 (최소화)
+mosaic: 0.3 # 모자이크 확률 (최소)
+mixup: 0.0 # 믹스업 비활성화
+copy_paste: 0.0 # 복사-붙여넣기 비활성화
+
+# KAIST 특화 최소 파라미터
+# 클래스별 가중치 (균등)
+class_weights: [1.0, 1.0, 1.0, 1.0]
+# 작은 객체 강조 계수 (최소)
+small_object_weight: 1.0
+# 멀티모달 융합 가중치 (균등)
+fusion_weight_rgb: 0.5
+fusion_weight_thermal: 0.5
+# 야간/저조도 조건 강조 (비활성화)
+low_light_enhancement: False
+# Thermal 노이즈 시뮬레이션 (최소)
+thermal_noise_std: 5.0

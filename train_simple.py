@@ -70,7 +70,7 @@ from utils.torch_utils import (
     select_device,
     smart_optimizer,
 )
-
+from utils.autoanchor import check_anchors
 
 # LOGGERS = ("csv", "tb", "wandb", "clearml", "comet")  # *.csv, TensorBoard, Weights & Biases, ClearML
 LOGGERS = ("wandb",)  # *.csv, TensorBoard, Weights & Biases, ClearML
@@ -128,11 +128,17 @@ def train(hyp, opt, device, callbacks):
 
     # Process custom dataset artifact link
     data_dict = loggers.remote_dataset
+    print("=====================================")
+    
 
     # Config
-    init_seeds(opt.seed, deterministic=True)
+    # custom: CBAM을 추가하니, 이 deterministic 부분 때문에 오류 생김
+    # AveragePool 때문이라는 것 같음
+    # init_seeds(opt.seed, deterministic=True)
+    init_seeds(opt.seed, deterministic=False)
     data_dict = data_dict or check_dataset(data)  # check if None
     train_path, val_path = data_dict["train"], data_dict["val"]
+    print(train_path)
     nc = 1 if single_cls else int(data_dict["nc"])  # number of classes
     names = {0: data_dict["names"][0]} if single_cls and len(data_dict["names"]) != 1 else data_dict["names"]  # class names
 
@@ -218,6 +224,10 @@ def train(hyp, opt, device, callbacks):
         rgbt_input=opt.rgbt,
     )[0]
 
+    # custom: autoanchor를 사용하여 최적의 anchor 도출
+    check_anchors(dataset, model)
+    import time
+    time.sleep(5)
     # pre-reduce anchor precision
     model.half().float()
 
@@ -246,7 +256,7 @@ def train(hyp, opt, device, callbacks):
     scheduler.last_epoch = start_epoch - 1  # do not move
     scaler = torch.amp.GradScaler(enabled=amp)
     stopper, stop = EarlyStopping(patience=opt.patience), False
-    compute_loss = ComputeLoss(model)  # init loss class
+    compute_loss = ComputeLoss(model, opt.is_train)  # init loss class
     callbacks.run("on_train_start")
     LOGGER.info(
         f'Image sizes {imgsz} train, {imgsz} val\n'
@@ -457,6 +467,8 @@ def parse_opt(known=False):
     parser.add_argument("--upload_dataset", nargs="?", const=True, default=False, help='Upload data, "val" option')
     parser.add_argument("--bbox_interval", type=int, default=-1, help="Set bounding-box image logging interval")
     parser.add_argument("--artifact_alias", type=str, default="latest", help="Version of dataset artifact to use")
+    parser.add_argument("--is-train", type=bool, default=True, help="Train or Test")
+
 
     return parser.parse_known_args()[0] if known else parser.parse_args()
 
