@@ -45,7 +45,7 @@ def plot_set_counts(set_counts):
     plt.show()
 
 # Example usage
-image_folder = "/home/chanwoo/git/deeplearning_2025_1/AUE8088/datasets/kaist-rgbt/test/images/visible"
+image_folder = "datasets/kaist-rgbt/test/images/visible"
 set_counts = count_images_by_set(image_folder)
 
 # Print results

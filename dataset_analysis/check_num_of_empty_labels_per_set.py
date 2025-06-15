@@ -57,7 +57,7 @@ def plot_label_counts(set_counts):
     plt.show()
 
 # Example usage
-label_folder = "/home/chanwoo/git/deeplearning_2025_1/AUE8088/datasets/kaist-rgbt/train/labels"
+label_folder = "datasets/kaist-rgbt/train/labels"
 set_counts = count_labels_by_set(label_folder)
 
 # Print results

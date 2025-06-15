@@ -1,19 +1,14 @@
 copy_paste: 0.0
-
-# # KAIST 특화 추가 파라미터
-# 클래스별 가중치 (person > people > cyclist > person?)
-class_weights: [1.0, 0.8, 0.9, 0.6]
-# 작은 객체 강조 계수
+class_weights:
+- 1.0
+- 0.8
+- 0.9
+- 0.6
 small_object_weight: 1.5
-# 멀티모달 융합 가중치
 fusion_weight_rgb: 0.6
 fusion_weight_thermal: 0.4
-# 야간/저조도 조건 강조
-low_light_enhancement: True
-# Thermal 노이즈 시뮬레이션
+low_light_enhancement: true
 thermal_noise_std: 15.0
-
-
 lr0: 0.01
 lrf: 0.1
 momentum: 0.937
@@ -22,13 +17,12 @@ warmup_epochs: 2.0
 warmup_momentum: 0.5
 warmup_bias_lr: 0.05
 box: 0.15
-cls: 0.20
+cls: 0.2
 cls_pw: 1.0
 obj: 2.5
 obj_pw: 1.0
 iou_t: 0.2
 anchor_t: 4.0
-# anchors: 3.63
 fl_gamma: 0.0
 hsv_h: 0.015
 hsv_s: 0.7

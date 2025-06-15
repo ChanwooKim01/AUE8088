@@ -374,7 +374,6 @@ class Focus(nn.Module):
 
     def forward(self, x):
         """Processes input through Focus mechanism, reshaping (b,c,w,h) to (b,4c,w/2,h/2) then applies convolution."""
-        print(type(x))
         return self.conv(torch.cat((x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]), 1))
         # return self.conv(self.contract(x))
 
@@ -1135,90 +1134,3 @@ class Classify(nn.Module):
         if isinstance(x, list):
             x = torch.cat(x, 1)
         return self.linear(self.drop(self.pool(self.conv(x)).flatten(1)))
-
-# custom
-class CBAM(nn.Module):
-    def __init__(self, channels, reduction_ratio=16, kernel_size=7):
-        super(CBAM, self).__init__()
-        
-        # Channel Attention - BatchNorm 추가
-        self.max_pool = nn.AdaptiveMaxPool2d(1)
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        
-        self.fc = nn.Sequential(
-            nn.Conv2d(channels, channels // reduction_ratio, 1, bias=False),
-            #nn.BatchNorm2d(channels // reduction_ratio),  # BatchNorm 추가
-            nn.ReLU(inplace=True),
-            nn.Conv2d(channels // reduction_ratio, channels, 1, bias=False),
-            #nn.BatchNorm2d(channels)  # BatchNorm 추가
-        )
-        
-        # Spatial Attention - BatchNorm 추가
-        self.conv_spatial = nn.Sequential(
-            nn.Conv2d(2, 1, kernel_size, padding=kernel_size//2, bias=False),
-            #nn.BatchNorm2d(1)  # BatchNorm 추가
-        )
-        
-    def forward(self, x):        
-        # Channel Attention
-        max_out = self.fc(self.max_pool(x))
-        avg_out = self.fc(self.avg_pool(x))
-        
-        # Clamp를 추가하여 수치적 안정성 확보
-        channel_att = torch.sigmoid(torch.clamp(max_out + avg_out, -10, 10))
-        x = x * channel_att
-        
-        # Spatial Attention
-        max_out, _ = torch.max(x, dim=1, keepdim=True)
-        avg_out = torch.mean(x, dim=1, keepdim=True)
-        spatial_feat = torch.cat([max_out, avg_out], dim=1)
-        
-        # Clamp를 추가하여 수치적 안정성 확보
-        spatial_att = torch.sigmoid(torch.clamp(self.conv_spatial(spatial_feat), -10, 10))
-        x = x * spatial_att
-        
-        return x
-    
-# C3_CBAM: C3 block + CBAM
-
-class C3_CBAM(nn.Module):
-    def __init__(self, c1, c2, n=1, e=0.5, shortcut=True, g=1, reduction_ratio=16, kernel_size=7):
-        """
-        Args:
-            c1: input channels
-            c2: output channels
-            n: number of Bottleneck blocks in C3
-            e: expansion ratio
-            shortcut: use shortcut or not
-            g: groups
-            reduction_ratio: CBAM channel reduction ratio
-            kernel_size: CBAM spatial kernel size
-        """
-        super(C3_CBAM, self).__init__()
-        self.c3 = C3(c1, c2, n=n, e=e, shortcut=shortcut, g=g)
-        self.cbam = CBAM(c2, reduction_ratio=reduction_ratio, kernel_size=kernel_size)
-
-    def forward(self, x):
-        x = self.c3(x)
-        x = self.cbam(x)
-        return x
-
-class SELayer(nn.Module):
-    def __init__(self, c1, channel, reduction=16):  # 원래대로
-        super(SELayer, self).__init__()
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Sequential(
-           nn.Linear(channel, channel // reduction, bias=False),
-           nn.ReLU(inplace=True),
-           nn.Linear(channel // reduction, channel, bias=False),
-           nn.Sigmoid()
-         )
-       
-    def forward(self, x):
-        if not isinstance(x, torch.Tensor):
-            raise TypeError(f"Expected torch.Tensor, got {type(x)}")
-            
-        b, c, _, _ = x.size()
-        y = self.avg_pool(x).view(b, c)
-        y = self.fc(y).view(b, c, 1, 1)
-        return x * y

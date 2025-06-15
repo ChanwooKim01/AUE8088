@@ -1,7 +1,7 @@
 # 파일 이름 정의
-input_file = "/home/chanwoo/git/deeplearning_2025_1/AUE8088/datasets/kaist-rgbt/train-all-04.txt"  # 원본 txt 파일 이름
-train_file = "/home/chanwoo/git/deeplearning_2025_1/AUE8088/datasets/kaist-rgbt/train-set.txt"  # set00, set02, set04로 시작하는 파일 저장
-val_file = "/home/chanwoo/git/deeplearning_2025_1/AUE8088/datasets/kaist-rgbt/val-set.txt"  # set01, set03, set05로 시작하는 파일 저장
+input_file = "datasets/kaist-rgbt/train-all-04.txt"  # 원본 txt 파일 이름
+train_file = "datasets/kaist-rgbt/train-set.txt"  # set00, set02, set04로 시작하는 파일 저장
+val_file = "datasets/kaist-rgbt/val-set.txt"  # set01, set03, set05로 시작하는 파일 저장
 
 # 파일 읽기 및 분류
 with open(input_file, "r") as infile, \

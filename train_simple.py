@@ -1,4 +1,3 @@
-# YOLOv5 🚀 by Ultralytics, AGPL-3.0 license
 """
 Train a YOLOv5 model on a custom dataset.
 
@@ -74,7 +73,7 @@ from utils.autoanchor import check_anchors
 
 # LOGGERS = ("csv", "tb", "wandb", "clearml", "comet")  # *.csv, TensorBoard, Weights & Biases, ClearML
 LOGGERS = ("wandb",)  # *.csv, TensorBoard, Weights & Biases, ClearML
-
+#LOGGERS = ("csv",)
 def train(hyp, opt, device, callbacks):
     """
     Trains YOLOv5 model with given hyperparameters, options, and device, managing datasets, model architecture, loss
@@ -134,11 +133,11 @@ def train(hyp, opt, device, callbacks):
     # Config
     # custom: CBAM을 추가하니, 이 deterministic 부분 때문에 오류 생김
     # AveragePool 때문이라는 것 같음
-    # init_seeds(opt.seed, deterministic=True)
-    init_seeds(opt.seed, deterministic=False)
+    init_seeds(opt.seed, deterministic=True)
+    #init_seeds(opt.seed, deterministic=False)
     data_dict = data_dict or check_dataset(data)  # check if None
     train_path, val_path = data_dict["train"], data_dict["val"]
-    print(train_path)
+    #print(train_path)
     nc = 1 if single_cls else int(data_dict["nc"])  # number of classes
     names = {0: data_dict["names"][0]} if single_cls and len(data_dict["names"]) != 1 else data_dict["names"]  # class names
 
@@ -191,7 +190,7 @@ def train(hyp, opt, device, callbacks):
         gs,
         single_cls,
         hyp=hyp,
-        augment=False,      # TODO: make it work
+        augment=True,      # TODO: make it work
         cache=None if opt.cache == "val" else opt.cache,
         rect=opt.rect,
         rank=-1,
@@ -204,10 +203,10 @@ def train(hyp, opt, device, callbacks):
         rgbt_input=opt.rgbt,
     )
     labels = np.concatenate(dataset.labels, 0)
+    print(labels)
     mlc = int(labels[:, 0].max())  # max label class
     assert mlc < nc, f"Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}"
 
-    # Valloader
     val_loader = create_dataloader(
         val_path,
         imgsz,
@@ -215,6 +214,7 @@ def train(hyp, opt, device, callbacks):
         gs,
         single_cls,
         hyp=hyp,
+        augment=False,
         cache=None if noval else opt.cache,
         rect=False,     # Should be set to False for validation, otherwise it will break evaluation pipeline
         rank=-1,
@@ -222,12 +222,13 @@ def train(hyp, opt, device, callbacks):
         pad=0.5,
         prefix=colorstr("val: "),
         rgbt_input=opt.rgbt,
+        is_val=True
     )[0]
 
     # custom: autoanchor를 사용하여 최적의 anchor 도출
-    check_anchors(dataset, model)
-    import time
-    time.sleep(5)
+    # check_anchors(dataset, model)
+    # import time
+    # time.sleep(5)
     # pre-reduce anchor precision
     model.half().float()
 
@@ -268,6 +269,7 @@ def train(hyp, opt, device, callbacks):
         callbacks.run("on_train_epoch_start")
         model.train()
 
+        # custom
         mloss = torch.zeros(3, device=device)  # mean losses
         pbar = enumerate(train_loader)
         LOGGER.info(("\n" + "%11s" * 7) % ("Epoch", "GPU_mem", "box_loss", "obj_loss", "cls_loss", "Instances", "Size"))
@@ -343,6 +345,7 @@ def train(hyp, opt, device, callbacks):
                 half=amp,
                 model=ema.ema,
                 single_cls=single_cls,
+                augment=False,
                 save_json=True,
                 dataloader=val_loader,
                 save_dir=save_dir,
@@ -404,6 +407,7 @@ def train(hyp, opt, device, callbacks):
                     single_cls=single_cls,
                     dataloader=val_loader,
                     save_dir=save_dir,
+                    augment=False,
                     save_json=True,
                     verbose=True,
                     plots=False,
@@ -424,8 +428,8 @@ def parse_opt(known=False):
     parser = argparse.ArgumentParser()
     parser.add_argument("--weights", type=str, default=ROOT / "yolov5s.pt", help="initial weights path")
     parser.add_argument("--cfg", type=str, default="", help="model.yaml path")
-    parser.add_argument("--data", type=str, default=ROOT / "data/coco128.yaml", help="dataset.yaml path")
-    parser.add_argument("--hyp", type=str, default=ROOT / "data/hyps/hyp.scratch-low.yaml", help="hyperparameters path")
+    parser.add_argument("--data", type=str, default=ROOT / "data/kaist-rgbt.yaml", help="dataset.yaml path")
+    parser.add_argument("--hyp", type=str, default=ROOT / "data/hyps/hyp.kaist-rgbt.yaml", help="hyperparameters path")
     parser.add_argument("--epochs", type=int, default=100, help="total training epochs")
     parser.add_argument("--batch-size", type=int, default=16, help="total batch size for all GPUs, -1 for autobatch")
     parser.add_argument("--imgsz", "--img", "--img-size", type=int, default=640, help="train, val image size (pixels)")
