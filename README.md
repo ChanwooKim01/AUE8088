@@ -107,15 +107,15 @@
   $ python train_simple.py \
     --img 640 \
     --batch-size 16 \
-    --epochs 20 \
+    --epochs 40 \
     --data data/kaist-rgbt.yaml \
-    --cfg models/yolov5n_kaist-rgbt.yaml \
-    --weights yolov5n.pt \
-    --workers 16 \
+    --cfg models/yolov5s_kaist-rgbt.yaml \
+    --weights yolov5s.pt \
+    --hyp data/hyps/hyp.kaist-rgbt.yaml
+    --workers 8 \
     --name yolov5n-rgbt \
     --entity $WANDB_ENTITY \
     --rgbt \
-    --single-cls
   ```
 
 ### Evaluation (eval.ai server)

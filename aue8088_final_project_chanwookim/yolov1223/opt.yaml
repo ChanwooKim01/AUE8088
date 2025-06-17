@@ -1,0 +1,79 @@
+weights: yolov5s.pt
+cfg: models/yolov12n_kaist-rgbt.yaml
+data: data/kaist-rgbt.yaml
+hyp:
+  copy_paste: 0.0
+  class_weights:
+  - 1.0
+  - 0.8
+  - 0.9
+  - 0.6
+  small_object_weight: 1.5
+  fusion_weight_rgb: 0.6
+  fusion_weight_thermal: 0.4
+  low_light_enhancement: true
+  thermal_noise_std: 15.0
+  lr0: 0.01
+  lrf: 0.1
+  momentum: 0.937
+  weight_decay: 0.00036
+  warmup_epochs: 2.0
+  warmup_momentum: 0.5
+  warmup_bias_lr: 0.05
+  box: 0.15
+  cls: 0.2
+  cls_pw: 1.0
+  obj: 2.5
+  obj_pw: 1.0
+  iou_t: 0.2
+  anchor_t: 4.0
+  fl_gamma: 0.0
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+  degrees: 5.0
+  translate: 0.2
+  scale: 0.5
+  shear: 2.0
+  perspective: 0.001
+  flipud: 0.0
+  fliplr: 0.5
+  mosaic: 1.0
+  mixup: 0.25
+epochs: 40
+batch_size: 8
+imgsz: 640
+rect: false
+resume: false
+nosave: false
+noval: false
+noautoanchor: false
+noplots: false
+evolve: null
+evolve_population: data/hyps
+resume_evolve: null
+bucket: ''
+cache: null
+device: ''
+multi_scale: false
+single_cls: false
+optimizer: Adam
+sync_bn: false
+workers: 8
+project: aue8088_final_project_chanwookim
+name: yolov12
+exist_ok: false
+quad: false
+cos_lr: false
+label_smoothing: 0.0
+patience: 100
+save_period: -1
+seed: 0
+local_rank: -1
+rgbt: true
+entity: chanwookim01-hanyang-university
+upload_dataset: false
+bbox_interval: -1
+artifact_alias: latest
+is_train: true
+save_dir: aue8088_final_project_chanwookim/yolov1223

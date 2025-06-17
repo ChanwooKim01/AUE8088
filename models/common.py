@@ -22,6 +22,8 @@ import torch.nn as nn
 from PIL import Image
 from torch.cuda import amp
 
+from typing import List, Optional, Tuple
+
 # Import 'ultralytics' package or install if missing
 try:
     import ultralytics
@@ -77,6 +79,7 @@ class Conv(nn.Module):
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
         """Initializes a standard convolution layer with optional batch normalization and activation."""
         super().__init__()
+        # print(f"Initializing Conv: c1={c1}, c2={c2}, k={k}, s={s}, p={p}, g={g}, d={d}, act={act}")
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
         self.bn = nn.BatchNorm2d(c2)
         self.act = self.default_act if act is True else act if isinstance(act, nn.Module) else nn.Identity()
@@ -178,22 +181,49 @@ class TransformerBlock(nn.Module):
         return self.tr(p + self.linear(p)).permute(1, 2, 0).reshape(b, self.c2, w, h)
 
 
+# class Bottleneck(nn.Module):
+#     # Standard bottleneck
+#     def __init__(self, c1, c2, shortcut=True, g=1, e=0.5):
+#         """Initializes a standard bottleneck layer with optional shortcut and group convolution, supporting channel
+#         expansion.
+#         """
+#         super().__init__()
+#         c_ = int(c2 * e)  # hidden channels
+#         self.cv1 = Conv(c1, c_, 1, 1)
+#         self.cv2 = Conv(c_, c2, 3, 1, g=g)
+#         self.add = shortcut and c1 == c2
+
+#     def forward(self, x):
+#         """Processes input through two convolutions, optionally adds shortcut if channel dimensions match; input is a
+#         tensor.
+#         """
+#         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+
 class Bottleneck(nn.Module):
-    # Standard bottleneck
-    def __init__(self, c1, c2, shortcut=True, g=1, e=0.5):
-        """Initializes a standard bottleneck layer with optional shortcut and group convolution, supporting channel
-        expansion.
+    """Standard bottleneck."""
+
+    def __init__(
+        self, c1: int, c2: int, shortcut: bool = True, g: int = 1, k: Tuple[int, int] = (3, 3), e: float = 0.5
+    ):
+        """
+        Initialize a standard bottleneck module.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            shortcut (bool): Whether to use shortcut connection.
+            g (int): Groups for convolutions.
+            k (tuple): Kernel sizes for convolutions.
+            e (float): Expansion ratio.
         """
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = Conv(c_, c2, 3, 1, g=g)
+        self.cv1 = Conv(c1, c_, k[0], 1)
+        self.cv2 = Conv(c_, c2, k[1], 1, g=g)
         self.add = shortcut and c1 == c2
 
-    def forward(self, x):
-        """Processes input through two convolutions, optionally adds shortcut if channel dimensions match; input is a
-        tensor.
-        """
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply bottleneck with optional shortcut connection."""
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
 
@@ -267,6 +297,10 @@ class MultiStreamC3(nn.Module):
         convolutions, and expansion.
         """
         super().__init__()
+        print(c1)
+        print(c2)
+        print(n)
+        print(num_streams)
         self.c3_layers = nn.ModuleList([C3(c1, c2, n, shortcut, g, e) for _ in range(num_streams)])
 
     def forward(self, x):
@@ -470,7 +504,6 @@ class Concat(nn.Module):
         int.
         """
         return torch.cat(x, self.d)
-
 
 class Fusion(nn.Module):
     # Concatenate a list of tensors along dimension
@@ -1136,67 +1169,734 @@ class Classify(nn.Module):
         return self.linear(self.drop(self.pool(self.conv(x)).flatten(1)))
 
 
-class CBAM(nn.Module):
-    def __init__(self, channels, reduction_ratio=16, kernel_size=7):
-        super(CBAM, self).__init__()
-        
-        # Channel Attention - BatchNorm 추가
-        self.max_pool = nn.AdaptiveMaxPool2d(1)
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        
-        self.fc = nn.Sequential(
-            nn.Conv2d(channels, channels // reduction_ratio, 1, bias=False),
-            #nn.BatchNorm2d(channels // reduction_ratio),  # BatchNorm 추가
-            nn.ReLU(inplace=True),
-            nn.Conv2d(channels // reduction_ratio, channels, 1, bias=False),
-            #nn.BatchNorm2d(channels)  # BatchNorm 추가
-        )
-        
-        # Spatial Attention - BatchNorm 추가
-        self.conv_spatial = nn.Sequential(
-            nn.Conv2d(2, 1, kernel_size, padding=kernel_size//2, bias=False),
-            #nn.BatchNorm2d(1)  # BatchNorm 추가
-        )
-        
-    def forward(self, x):        
-        # Channel Attention
-        max_out = self.fc(self.max_pool(x))
-        avg_out = self.fc(self.avg_pool(x))
-        
-        # Clamp를 추가하여 수치적 안정성 확보
-        channel_att = torch.sigmoid(torch.clamp(max_out + avg_out, -10, 10))
-        x = x * channel_att
-        
-        # Spatial Attention
-        max_out, _ = torch.max(x, dim=1, keepdim=True)
-        avg_out = torch.mean(x, dim=1, keepdim=True)
-        spatial_feat = torch.cat([max_out, avg_out], dim=1)
-        
-        # Clamp를 추가하여 수치적 안정성 확보
-        spatial_att = torch.sigmoid(torch.clamp(self.conv_spatial(spatial_feat), -10, 10))
-        x = x * spatial_att
-        
-        return x
-    
-# C3_CBAM: C3 block + CBAM
-class C3_CBAM(nn.Module):
-    def __init__(self, c1, c2, n=1, e=0.5, shortcut=True, g=1, reduction_ratio=16, kernel_size=7):
+class C2f(nn.Module):
+    """Faster Implementation of CSP Bottleneck with 2 convolutions."""
+
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False, e: float = 0.5, g: int = 1):
         """
+        Initialize a CSP bottleneck with 2 convolutions.
+
         Args:
-            c1: input channels
-            c2: output channels
-            n: number of Bottleneck blocks in C3
-            e: expansion ratio
-            shortcut: use shortcut or not
-            g: groups
-            reduction_ratio: CBAM channel reduction ratio
-            kernel_size: CBAM spatial kernel size
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of Bottleneck blocks.
+            shortcut (bool): Whether to use shortcut connections.
+            g (int): Groups for convolutions.
+            e (float): Expansion ratio.
         """
-        super(C3_CBAM, self).__init__()
-        self.c3 = C3(c1, c2, n=n, e=e, shortcut=shortcut, g=g)
-        self.cbam = CBAM(c2, reduction_ratio=reduction_ratio, kernel_size=kernel_size)
+        
+        if g != 1: # debug: 뭔가 잘못되었다
+            temp_e = e
+            temp_g = g
+            g = 1  # set groups to 1 for Conv2d
+            e = temp_g
+        
+        super().__init__()
+        self.c = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
+        self.m = nn.ModuleList(Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through C2f layer."""
+        y = list(self.cv1(x).chunk(2, 1))
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(torch.cat(y, 1))
+
+    def forward_split(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass using split() instead of chunk()."""
+        y = self.cv1(x).split((self.c, self.c), 1)
+        y = [y[0], y[1]]
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(torch.cat(y, 1))
+
+
+class C3k(C3):
+    """C3k is a CSP bottleneck module with customizable kernel sizes for feature extraction in neural networks."""
+
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, e: float = 0.5, g: int = 1, k: int = 3):
+        """
+        Initialize C3k module.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of Bottleneck blocks.
+            shortcut (bool): Whether to use shortcut connections.
+            g (int): Groups for convolutions.
+            e (float): Expansion ratio.
+            k (int): Kernel size.
+        """
+        super().__init__(c1, c2, n, shortcut, g, e)
+        c_ = int(c2 * e)  # hidden channels
+        # self.m = nn.Sequential(*(RepBottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
+        self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
+
+class MultiStreamC3k(nn.Module):
+    # CSP Bottleneck with 3 convolutions for RGB+T inputs
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, e: float = 0.5, g: int = 1, k: int = 3, num_streams: int = 2):
+        """Initializes C3 module with options for channel count, bottleneck repetition, shortcut usage, group
+        convolutions, and expansion.
+        """
+        super().__init__()
+        self.c3k_layers = nn.ModuleList([C3k(c1, c2, n, shortcut, g, e, k) for _ in range(num_streams)])
 
     def forward(self, x):
-        x = self.c3(x)
-        x = self.cbam(x)
+        """Performs forward propagation using concatenated outputs from two convolutions and a Bottleneck sequence."""
+        assert len(x) == len(self.c3k_layers), 'The number of input data stream does not match the predefined settings.'
+        return [_layer(_x) for _x, _layer in zip(x, self.c3k_layers)]
+
+class C3k2(C2f):
+    """Faster Implementation of CSP Bottleneck with 2 convolutions."""
+
+    def __init__(
+        self, c1: int, c2: int, n: int = 1, c3k: bool = False, e: float = 0.5, g: int = 1, shortcut: bool = True
+    ):
+        """
+        Initialize C3k2 module.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of blocks.
+            c3k (bool): Whether to use C3k blocks.
+            e (float): Expansion ratio.
+            g (int): Groups for convolutions.
+            shortcut (bool): Whether to use shortcut connections.
+        """
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.m = nn.ModuleList(
+            C3k(self.c, self.c, 2, shortcut, g) if c3k else Bottleneck(self.c, self.c, shortcut, g) for _ in range(n)
+        )
+
+class MultiStreamC3k2(nn.Module):
+    # C3k2 with 2 shortcuts for RGB+T inputs
+    
+    def __init__(
+        self, c1: int, c2: int, n: int = 1, c3k: bool = False, e: float = 0.5, g: int = 1, shortcut: bool = True, num_streams: int = 2
+    ):
+    #def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, num_streams=2):
+        """Initializes C3k2 module with options for channel count, bottleneck repetition, shortcut usage, group
+        convolutions, and expansion.
+        """
+        super().__init__()
+        self.c3k2_layers = nn.ModuleList([C3k2(c1, c2, n, shortcut, g, e) for _ in range(num_streams)])
+
+    def forward(self, x):
+        """Performs forward propagation using concatenated outputs from two convolutions and a Bottleneck sequence."""
+        assert len(x) == len(self.c3k2_layers), 'The number of input data stream does not match the predefined settings.'
+        return [_layer(_x) for _x, _layer in zip(x, self.c3k2_layers)]
+
+class AreaAttention(nn.Module):
+    """Area Attention mechanism for YOLO12."""
+    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., sr_ratio=1):
+        super().__init__()
+        assert dim % num_heads == 0, f"dim {dim} should be divided by num_heads {num_heads}."
+        
+        self.dim = dim
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = head_dim ** -0.5
+        
+        self.q = nn.Linear(dim, dim, bias=qkv_bias)
+        self.kv = nn.Linear(dim, dim * 2, bias=qkv_bias)
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+        
+        self.sr_ratio = sr_ratio
+        if sr_ratio > 1:
+            self.sr = nn.Conv2d(dim, dim, kernel_size=sr_ratio, stride=sr_ratio)
+            self.norm = nn.LayerNorm(dim)
+
+    def forward(self, x):
+        B, N, C = x.shape
+        H = W = int(N ** 0.5)
+        
+        q = self.q(x).reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+        
+        if self.sr_ratio > 1:
+            x_ = x.permute(0, 2, 1).reshape(B, C, H, W)
+            x_ = self.sr(x_).reshape(B, C, -1).permute(0, 2, 1)
+            x_ = self.norm(x_)
+            kv = self.kv(x_).reshape(B, -1, 2, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        else:
+            kv = self.kv(x).reshape(B, -1, 2, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        k, v = kv[0], kv[1]
+        
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+        
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        
         return x
+
+
+class AreaAttentionBlock(nn.Module):
+    """Area Attention Block for YOLO12."""
+    def __init__(self, dim, num_heads=8, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.,
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, sr_ratio=1):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+        self.attn = AreaAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias,
+                                 attn_drop=attn_drop, proj_drop=drop, sr_ratio=sr_ratio)
+        
+        self.norm2 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, mlp_hidden_dim),
+            act_layer(),
+            nn.Dropout(drop),
+            nn.Linear(mlp_hidden_dim, dim),
+            nn.Dropout(drop)
+        )
+
+    def forward(self, x):
+        x = x + self.attn(self.norm1(x))
+        x = x + self.mlp(self.norm2(x))
+        return x
+
+class AAttn(nn.Module):
+    """
+    Area-attention module for YOLO models, providing efficient attention mechanisms.
+
+    This module implements an area-based attention mechanism that processes input features in a spatially-aware manner,
+    making it particularly effective for object detection tasks.
+
+    Attributes:
+        area (int): Number of areas the feature map is divided.
+        num_heads (int): Number of heads into which the attention mechanism is divided.
+        head_dim (int): Dimension of each attention head.
+        qkv (Conv): Convolution layer for computing query, key and value tensors.
+        proj (Conv): Projection convolution layer.
+        pe (Conv): Position encoding convolution layer.
+
+    Methods:
+        forward: Applies area-attention to input tensor.
+
+    Examples:
+        >>> attn = AAttn(dim=256, num_heads=8, area=4)
+        >>> x = torch.randn(1, 256, 32, 32)
+        >>> output = attn(x)
+        >>> print(output.shape)
+        torch.Size([1, 256, 32, 32])
+    """
+
+    def __init__(self, dim: int, num_heads: int, area: int = 1):
+        """
+        Initialize an Area-attention module for YOLO models.
+
+        Args:
+            dim (int): Number of hidden channels.
+            num_heads (int): Number of heads into which the attention mechanism is divided.
+            area (int): Number of areas the feature map is divided.
+        """
+        super().__init__()
+        self.area = area
+
+        self.num_heads = num_heads
+        self.head_dim = head_dim = dim // num_heads
+        all_head_dim = head_dim * self.num_heads
+
+        self.qkv = Conv(dim, all_head_dim * 3, 1, act=False)
+        self.proj = Conv(all_head_dim, dim, 1, act=False)
+        self.pe = Conv(all_head_dim, dim, 7, 1, 3, g=dim, act=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Process the input tensor through the area-attention.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            (torch.Tensor): Output tensor after area-attention.
+        """
+        B, C, H, W = x.shape
+        N = H * W
+
+        qkv = self.qkv(x).flatten(2).transpose(1, 2)
+        if self.area > 1:
+            qkv = qkv.reshape(B * self.area, N // self.area, C * 3)
+            B, N, _ = qkv.shape
+        q, k, v = (
+            qkv.view(B, N, self.num_heads, self.head_dim * 3)
+            .permute(0, 2, 3, 1)
+            .split([self.head_dim, self.head_dim, self.head_dim], dim=2)
+        )
+        attn = (q.transpose(-2, -1) @ k) * (self.head_dim**-0.5)
+        attn = attn.softmax(dim=-1)
+        x = v @ attn.transpose(-2, -1)
+        x = x.permute(0, 3, 1, 2)
+        v = v.permute(0, 3, 1, 2)
+
+        if self.area > 1:
+            x = x.reshape(B // self.area, N * self.area, C)
+            v = v.reshape(B // self.area, N * self.area, C)
+            B, N, _ = x.shape
+
+        x = x.reshape(B, H, W, C).permute(0, 3, 1, 2).contiguous()
+        v = v.reshape(B, H, W, C).permute(0, 3, 1, 2).contiguous()
+
+        x = x + self.pe(v)
+        return self.proj(x)
+
+
+class ABlock(nn.Module):
+    """
+    Area-attention block module for efficient feature extraction in YOLO models.
+
+    This module implements an area-attention mechanism combined with a feed-forward network for processing feature maps.
+    It uses a novel area-based attention approach that is more efficient than traditional self-attention while
+    maintaining effectiveness.
+
+    Attributes:
+        attn (AAttn): Area-attention module for processing spatial features.
+        mlp (nn.Sequential): Multi-layer perceptron for feature transformation.
+
+    Methods:
+        _init_weights: Initializes module weights using truncated normal distribution.
+        forward: Applies area-attention and feed-forward processing to input tensor.
+
+    Examples:
+        >>> block = ABlock(dim=256, num_heads=8, mlp_ratio=1.2, area=1)
+        >>> x = torch.randn(1, 256, 32, 32)
+        >>> output = block(x)
+        >>> print(output.shape)
+        torch.Size([1, 256, 32, 32])
+    """
+
+    def __init__(self, dim: int, num_heads: int, mlp_ratio: float = 1.2, area: int = 1):
+        """
+        Initialize an Area-attention block module.
+
+        Args:
+            dim (int): Number of input channels.
+            num_heads (int): Number of heads into which the attention mechanism is divided.
+            mlp_ratio (float): Expansion ratio for MLP hidden dimension.
+            area (int): Number of areas the feature map is divided.
+        """
+        super().__init__()
+
+        self.attn = AAttn(dim, num_heads=num_heads, area=area)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = nn.Sequential(Conv(dim, mlp_hidden_dim, 1), Conv(mlp_hidden_dim, dim, 1, act=False))
+
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m: nn.Module):
+        """
+        Initialize weights using a truncated normal distribution.
+
+        Args:
+            m (nn.Module): Module to initialize.
+        """
+        if isinstance(m, nn.Conv2d):
+            nn.init.trunc_normal_(m.weight, std=0.02)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through ABlock.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            (torch.Tensor): Output tensor after area-attention and feed-forward processing.
+        """
+        x = x + self.attn(x)
+        return x + self.mlp(x)
+
+class A2C2f(nn.Module):
+    """
+    Area-Attention C2f module for enhanced feature extraction with area-based attention mechanisms.
+
+    This module extends the C2f architecture by incorporating area-attention and ABlock layers for improved feature
+    processing. It supports both area-attention and standard convolution modes.
+
+    Attributes:
+        cv1 (Conv): Initial 1x1 convolution layer that reduces input channels to hidden channels.
+        cv2 (Conv): Final 1x1 convolution layer that processes concatenated features.
+        gamma (nn.Parameter | None): Learnable parameter for residual scaling when using area attention.
+        m (nn.ModuleList): List of either ABlock or C3k modules for feature processing.
+
+    Methods:
+        forward: Processes input through area-attention or standard convolution pathway.
+
+    Examples:
+        >>> m = A2C2f(512, 512, n=1, a2=True, area=1)
+        >>> x = torch.randn(1, 512, 32, 32)
+        >>> output = m(x)
+        >>> print(output.shape)
+        torch.Size([1, 512, 32, 32])
+    """
+
+    def __init__(
+        self,
+        c1: int,
+        c2: int,
+        n: int = 1,
+        a2: bool = True,
+        area: int = 1,
+        residual: bool = False,
+        mlp_ratio: float = 2.0,
+        e: float = 0.5,
+        g: int = 1,
+        shortcut: bool = True,
+    ):
+        """
+        Initialize Area-Attention C2f module.
+
+        Args:
+            c1 (int): Number of input channels.
+            c2 (int): Number of output channels.
+            n (int): Number of ABlock or C3k modules to stack.
+            a2 (bool): Whether to use area attention blocks. If False, uses C3k blocks instead.
+            area (int): Number of areas the feature map is divided.
+            residual (bool): Whether to use residual connections with learnable gamma parameter.
+            mlp_ratio (float): Expansion ratio for MLP hidden dimension.
+            e (float): Channel expansion ratio for hidden channels.
+            g (int): Number of groups for grouped convolutions.
+            shortcut (bool): Whether to use shortcut connections in C3k blocks.
+        """
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        assert c_ % 32 == 0, "Dimension of ABlock be a multiple of 32."
+
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv((1 + n) * c_, c2, 1)
+
+        self.gamma = nn.Parameter(0.01 * torch.ones(c2), requires_grad=True) if a2 and residual else None
+        self.m = nn.ModuleList(
+            nn.Sequential(*(ABlock(c_, c_ // 32, mlp_ratio, area) for _ in range(2)))
+            if a2
+            else C3k(c_, c_, 2, shortcut, g)
+            for _ in range(n)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through A2C2f layer.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            (torch.Tensor): Output tensor after processing.
+        """
+        y = [self.cv1(x)]
+        y.extend(m(y[-1]) for m in self.m)
+        y = self.cv2(torch.cat(y, 1))
+        if self.gamma is not None:
+            return x + self.gamma.view(-1, len(self.gamma), 1, 1) * y
+        return y
+
+# class YOLOv12Detect(nn.Module):
+#     """
+#     YOLO Detect head for object detection models.
+
+#     This class implements the detection head used in YOLO models for predicting bounding boxes and class probabilities.
+#     It supports both training and inference modes, with optional end-to-end detection capabilities.
+
+#     Attributes:
+#         dynamic (bool): Force grid reconstruction.
+#         export (bool): Export mode flag.
+#         format (str): Export format.
+#         end2end (bool): End-to-end detection mode.
+#         max_det (int): Maximum detections per image.
+#         shape (tuple): Input shape.
+#         anchors (torch.Tensor): Anchor points.
+#         strides (torch.Tensor): Feature map strides.
+#         legacy (bool): Backward compatibility for v3/v5/v8/v9 models.
+#         xyxy (bool): Output format, xyxy or xywh.
+#         nc (int): Number of classes.
+#         nl (int): Number of detection layers.
+#         reg_max (int): DFL channels.
+#         no (int): Number of outputs per anchor.
+#         stride (torch.Tensor): Strides computed during build.
+#         cv2 (nn.ModuleList): Convolution layers for box regression.
+#         cv3 (nn.ModuleList): Convolution layers for classification.
+#         dfl (nn.Module): Distribution Focal Loss layer.
+#         one2one_cv2 (nn.ModuleList): One-to-one convolution layers for box regression.
+#         one2one_cv3 (nn.ModuleList): One-to-one convolution layers for classification.
+
+#     Methods:
+#         forward: Perform forward pass and return predictions.
+#         forward_end2end: Perform forward pass for end-to-end detection.
+#         bias_init: Initialize detection head biases.
+#         decode_bboxes: Decode bounding boxes from predictions.
+#         postprocess: Post-process model predictions.
+
+#     Examples:
+#         Create a detection head for 80 classes
+#         >>> detect = Detect(nc=80, ch=(256, 512, 1024))
+#         >>> x = [torch.randn(1, 256, 80, 80), torch.randn(1, 512, 40, 40), torch.randn(1, 1024, 20, 20)]
+#         >>> outputs = detect(x)
+#     """
+
+#     dynamic = False  # force grid reconstruction
+#     export = False  # export mode
+#     format = None  # export format
+#     end2end = False  # end2end
+#     max_det = 300  # max_det
+#     shape = None
+#     anchors = torch.empty(0)  # init
+#     strides = torch.empty(0)  # init
+#     legacy = False  # backward compatibility for v3/v5/v8/v9 models
+#     xyxy = False  # xyxy or xywh output
+
+#     def __init__(self, nc: int = 80, ch: tuple = ()):
+#         """
+#         Initialize the YOLO detection layer with specified number of classes and channels.
+
+#         Args:
+#             nc (int): Number of classes.
+#             ch (tuple): Tuple of channel sizes from backbone feature maps.
+#         """
+#         super().__init__()
+#         self.nc = nc  # number of classes
+#         self.nl = len(ch)  # number of detection layers
+#         self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
+#         self.no = nc + self.reg_max * 4  # number of outputs per anchor
+#         self.stride = torch.zeros(self.nl)  # strides computed during build
+#         c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], min(self.nc, 100))  # channels
+#         self.cv2 = nn.ModuleList(
+#             nn.Sequential(Conv(x, c2, 3), Conv(c2, c2, 3), nn.Conv2d(c2, 4 * self.reg_max, 1)) for x in ch
+#         )
+#         self.cv3 = (
+#             nn.ModuleList(nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3), nn.Conv2d(c3, self.nc, 1)) for x in ch)
+#             if self.legacy
+#             else nn.ModuleList(
+#                 nn.Sequential(
+#                     nn.Sequential(DWConv(x, x, 3), Conv(x, c3, 1)),
+#                     nn.Sequential(DWConv(c3, c3, 3), Conv(c3, c3, 1)),
+#                     nn.Conv2d(c3, self.nc, 1),
+#                 )
+#                 for x in ch
+#             )
+#         )
+#         self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
+
+#         if self.end2end:
+#             self.one2one_cv2 = copy.deepcopy(self.cv2)
+#             self.one2one_cv3 = copy.deepcopy(self.cv3)
+
+#     def forward(self, x: List[torch.Tensor]) -> Union[List[torch.Tensor], Tuple]:
+#         """Concatenate and return predicted bounding boxes and class probabilities."""
+#         if self.end2end:
+#             return self.forward_end2end(x)
+
+#         for i in range(self.nl):
+#             x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
+#         if self.training:  # Training path
+#             return x
+#         y = self._inference(x)
+#         return y if self.export else (y, x)
+
+#     def forward_end2end(self, x: List[torch.Tensor]) -> Union[dict, Tuple]:
+#         """
+#         Perform forward pass of the v10Detect module.
+
+#         Args:
+#             x (List[torch.Tensor]): Input feature maps from different levels.
+
+#         Returns:
+#             outputs (dict | tuple): Training mode returns dict with one2many and one2one outputs.
+#                 Inference mode returns processed detections or tuple with detections and raw outputs.
+#         """
+#         x_detach = [xi.detach() for xi in x]
+#         one2one = [
+#             torch.cat((self.one2one_cv2[i](x_detach[i]), self.one2one_cv3[i](x_detach[i])), 1) for i in range(self.nl)
+#         ]
+#         for i in range(self.nl):
+#             x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
+#         if self.training:  # Training path
+#             return {"one2many": x, "one2one": one2one}
+
+#         y = self._inference(one2one)
+#         y = self.postprocess(y.permute(0, 2, 1), self.max_det, self.nc)
+#         return y if self.export else (y, {"one2many": x, "one2one": one2one})
+
+#     def _inference(self, x: List[torch.Tensor]) -> torch.Tensor:
+#         """
+#         Decode predicted bounding boxes and class probabilities based on multiple-level feature maps.
+
+#         Args:
+#             x (List[torch.Tensor]): List of feature maps from different detection layers.
+
+#         Returns:
+#             (torch.Tensor): Concatenated tensor of decoded bounding boxes and class probabilities.
+#         """
+#         # Inference path
+#         shape = x[0].shape  # BCHW
+#         x_cat = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2)
+#         if self.format != "imx" and (self.dynamic or self.shape != shape):
+#             self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
+#             self.shape = shape
+
+#         if self.export and self.format in {"saved_model", "pb", "tflite", "edgetpu", "tfjs"}:  # avoid TF FlexSplitV ops
+#             box = x_cat[:, : self.reg_max * 4]
+#             cls = x_cat[:, self.reg_max * 4 :]
+#         else:
+#             box, cls = x_cat.split((self.reg_max * 4, self.nc), 1)
+
+#         if self.export and self.format in {"tflite", "edgetpu"}:
+#             # Precompute normalization factor to increase numerical stability
+#             # See https://github.com/ultralytics/ultralytics/issues/7371
+#             grid_h = shape[2]
+#             grid_w = shape[3]
+#             grid_size = torch.tensor([grid_w, grid_h, grid_w, grid_h], device=box.device).reshape(1, 4, 1)
+#             norm = self.strides / (self.stride[0] * grid_size)
+#             dbox = self.decode_bboxes(self.dfl(box) * norm, self.anchors.unsqueeze(0) * norm[:, :2])
+#         elif self.export and self.format == "imx":
+#             dbox = self.decode_bboxes(
+#                 self.dfl(box) * self.strides, self.anchors.unsqueeze(0) * self.strides, xywh=False
+#             )
+#             return dbox.transpose(1, 2), cls.sigmoid().permute(0, 2, 1)
+#         else:
+#             dbox = self.decode_bboxes(self.dfl(box), self.anchors.unsqueeze(0)) * self.strides
+
+#         return torch.cat((dbox, cls.sigmoid()), 1)
+
+#     def bias_init(self):
+#         """Initialize Detect() biases, WARNING: requires stride availability."""
+#         m = self  # self.model[-1]  # Detect() module
+#         # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1
+#         # ncf = math.log(0.6 / (m.nc - 0.999999)) if cf is None else torch.log(cf / cf.sum())  # nominal class frequency
+#         for a, b, s in zip(m.cv2, m.cv3, m.stride):  # from
+#             a[-1].bias.data[:] = 1.0  # box
+#             b[-1].bias.data[: m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
+#         if self.end2end:
+#             for a, b, s in zip(m.one2one_cv2, m.one2one_cv3, m.stride):  # from
+#                 a[-1].bias.data[:] = 1.0  # box
+#                 b[-1].bias.data[: m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
+
+#     def decode_bboxes(self, bboxes: torch.Tensor, anchors: torch.Tensor, xywh: bool = True) -> torch.Tensor:
+#         """Decode bounding boxes from predictions."""
+#         return dist2bbox(bboxes, anchors, xywh=xywh and not (self.end2end or self.xyxy), dim=1)
+
+#     @staticmethod
+#     def postprocess(preds: torch.Tensor, max_det: int, nc: int = 80) -> torch.Tensor:
+#         """
+#         Post-process YOLO model predictions.
+
+#         Args:
+#             preds (torch.Tensor): Raw predictions with shape (batch_size, num_anchors, 4 + nc) with last dimension
+#                 format [x, y, w, h, class_probs].
+#             max_det (int): Maximum detections per image.
+#             nc (int, optional): Number of classes.
+
+#         Returns:
+#             (torch.Tensor): Processed predictions with shape (batch_size, min(max_det, num_anchors), 6) and last
+#                 dimension format [x, y, w, h, max_class_prob, class_index].
+#         """
+#         batch_size, anchors, _ = preds.shape  # i.e. shape(16,8400,84)
+#         boxes, scores = preds.split([4, nc], dim=-1)
+#         index = scores.amax(dim=-1).topk(min(max_det, anchors))[1].unsqueeze(-1)
+#         boxes = boxes.gather(dim=1, index=index.repeat(1, 1, 4))
+#         scores = scores.gather(dim=1, index=index.repeat(1, 1, nc))
+#         scores, index = scores.flatten(1).topk(min(max_det, anchors))
+#         i = torch.arange(batch_size)[..., None]  # batch indices
+#         return torch.cat([boxes[i, index // nc], scores[..., None], (index % nc)[..., None].float()], dim=-1)
+# class PSA(nn.Module):
+#     """Position-Sensitive Attention for YOLO12."""
+#     def __init__(self, c1, c2, e=0.5):
+#         super().__init__()
+#         assert c1 == c2
+#         self.c = int(c1 * e)
+#         self.cv1 = Conv(c1, 2 * self.c, 1)
+#         self.cv2 = Conv(2 * self.c, c1, 1)
+        
+#         # Position-sensitive components
+#         self.attn = nn.MultiheadAttention(self.c, 8, batch_first=True)
+#         self.ffn = nn.Sequential(
+#             nn.Linear(self.c, 4 * self.c),
+#             nn.GELU(),
+#             nn.Linear(4 * self.c, self.c)
+#         )
+#         self.norm1 = nn.LayerNorm(self.c)
+#         self.norm2 = nn.LayerNorm(self.c)
+
+#     def forward(self, x):
+#         a, b = self.cv1(x).split((self.c, self.c), dim=1)
+        
+#         # Reshape for attention
+#         B, C, H, W = a.shape
+#         a_flat = a.flatten(2).permute(0, 2, 1)  # B, N, C
+        
+#         # Self-attention
+#         a_attn, _ = self.attn(a_flat, a_flat, a_flat)
+#         a_attn = self.norm1(a_attn + a_flat)
+        
+#         # Feed-forward
+#         a_ffn = self.ffn(a_attn)
+#         a_ffn = self.norm2(a_ffn + a_attn)
+        
+#         # Reshape back
+#         a_out = a_ffn.permute(0, 2, 1).reshape(B, C, H, W)
+        
+#         return self.cv2(torch.cat([a_out, b], 1))
+
+class ChannelAttention(nn.Module):
+    def __init__(self, in_planes, ratio=16):
+        super().__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        
+        self.fc = nn.Sequential(
+            nn.Conv2d(in_planes, in_planes // ratio, 1, bias=False),
+            nn.ReLU(),
+            nn.Conv2d(in_planes // ratio, in_planes, 1, bias=False)
+        )
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = self.fc(self.avg_pool(x))
+        max_out = self.fc(self.max_pool(x))
+        out = avg_out + max_out
+        return self.sigmoid(out)
+
+
+class SpatialAttention(nn.Module):
+    def __init__(self, kernel_size=7):
+        super().__init__()
+        self.conv1 = nn.Conv2d(2, 1, kernel_size, padding=kernel_size // 2, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        x = torch.cat([avg_out, max_out], dim=1)
+        x = self.conv1(x)
+        return self.sigmoid(x)
+
+class CBAM(nn.Module):
+    """Convolutional Block Attention Module."""
+    def __init__(self, c1, kernel_size=7):
+        super().__init__()
+        self.channel_attention = ChannelAttention(c1)
+        self.spatial_attention = SpatialAttention(kernel_size)
+
+    def forward(self, x):
+        x = self.channel_attention(x) * x
+        x = self.spatial_attention(x) * x
+        return x
+
+class C3_CBAM(C3):
+    """C3 module with CBAM attention."""
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.cbam = CBAM(c2)
+    def forward(self, x):
+        """Forward pass through C3_CBAM layer with attention."""
+        y = self.cv1(x)
+        y = self.m(y)
+        y = self.cv2(y)
+        return self.cbam(y)
+    
+    

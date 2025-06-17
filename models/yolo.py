@@ -24,7 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 if platform.system() != "Windows":
     ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
-
+    
 from models.common import (
     C3,
     C3SPP,
@@ -52,9 +52,18 @@ from models.common import (
     MultiStreamC3,
     MultiStreamMaxPool2d,
     Fusion,
-    CBAM,
-    C3_CBAM
+    # CBAM,
+    # C3_CBAM,
+    # YOLO12 모듈
+    C3k2,
+    MultiStreamC3k2,
+    A2C2f,
+    # YOLOv12Detect
+    # PSA,
+    # AreaAttention,
+    # AreaAttentionBlock,
 )
+
 from models.experimental import MixConv2d
 from utils.autoanchor import check_anchor_order
 from utils.general import LOGGER, check_version, check_yaml, colorstr, make_divisible, print_args
@@ -124,9 +133,8 @@ class Detect(nn.Module):
         yv, xv = torch.meshgrid(y, x, indexing="ij") if torch_1_10 else torch.meshgrid(y, x)  # torch>=0.7 compatibility
         grid = torch.stack((xv, yv), 2).expand(shape) - 0.5  # add grid offset, i.e. y = 2.0 * x - 0.5
         anchor_grid = (self.anchors[i] * self.stride[i]).view((1, self.na, 1, 1, 2)).expand(shape)
-        return grid, anchor_grid
-
-
+        return grid, anchor_grid    
+    
 class BaseModel(nn.Module):
     """YOLOv5 base model."""
 
@@ -189,7 +197,7 @@ class BaseModel(nn.Module):
             m.stride = fn(m.stride)
             m.grid = list(map(fn, m.grid))
             if isinstance(m.anchor_grid, list):
-                m.anchor_grid = list(map(fn, m.anchor_grid))
+                m.anchor_grid = list(map(fn, m.anchor_grid))        
         return self
 
 
@@ -316,6 +324,7 @@ class DetectionModel(BaseModel):
 
 Model = DetectionModel  # retain YOLOv5 'Model' class for backwards compatibility
 
+# parse_model 함수의 모듈 리스트에 YOLO12 모듈들을 추가
 def parse_model(d, ch):
     """Parses a YOLOv5 model from a dict `d`, configuring layers based on input channels `ch` and model architecture."""
     LOGGER.info(f"\n{'':>3}{'from':>18}{'n':>3}{'params':>10}  {'module':<40}{'arguments':<30}")
@@ -364,15 +373,21 @@ def parse_model(d, ch):
             C3x,
             MultiStreamConv,
             MultiStreamC3,
-            CBAM,
-            C3_CBAM
+            # CBAM,
+            # C3_CBAM,
+            # YOLO12 모듈들 추가
+            C3k2,
+            MultiStreamC3k2,
+            A2C2f,
+            # YOLOv12Detect
+            # PSA,
         }:
             c1, c2 = ch[f], args[0]
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, ch_mul)
 
             args = [c1, c2, *args[1:]]
-            if m in {BottleneckCSP, C3, C3TR, C3Ghost, C3x, MultiStreamC3}:
+            if m in {BottleneckCSP, C3, C3TR, C3Ghost, C3x, MultiStreamC3, C3k2, MultiStreamC3k2, A2C2f}:
                 args.insert(2, n)  # number of repeats
                 n = 1
         elif m is nn.BatchNorm2d:
@@ -384,6 +399,13 @@ def parse_model(d, ch):
             args.append([ch[x] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
+     
+    #    elif m in {YOLOv12Detect, }:
+    #         nc = args[0]
+    #         ch_list = [ch[x] for x in f]
+    #         args = [nc, ch_list]
+    #         c2 = sum(ch_list)  # 또는 필요 시 nc
+            
         elif m is Contract:
             c2 = ch[f] * args[0] ** 2
         elif m is Expand:

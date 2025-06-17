@@ -340,7 +340,7 @@ def train(hyp, opt, device, callbacks):
         if not noval or final_epoch:  # Calculate mAP
             results, maps, _ = validate.run(
                 data_dict,
-                batch_size=batch_size * 2,
+                batch_size=batch_size,
                 imgsz=imgsz,
                 half=amp,
                 model=ema.ema,
@@ -400,7 +400,7 @@ def train(hyp, opt, device, callbacks):
                 LOGGER.info(f"\nValidating {f}...")
                 results, _, _ = validate.run(
                     data_dict,
-                    batch_size=batch_size * 2,
+                    batch_size=batch_size,
                     imgsz=imgsz,
                     model=attempt_load(f, device).half(),
                     iou_thres=0.65 if is_coco else 0.60,  # best pycocotools at iou 0.65
